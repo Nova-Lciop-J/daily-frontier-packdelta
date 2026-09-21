@@ -25,7 +25,7 @@ or claim verified integration with the npm staging API.
 
 ## Install and run — no network or API key
 
-Run from this project directory using Python 3.13.5. Linux/Python 3.13.5 is the
+Run from this project directory using Python 3.13.15. Linux/Python 3.13.15 is the
 initial verification environment; other Python versions and operating systems
 are not yet claimed as verified. Python must already be installed. There are
 **no runtime or test dependencies**, so no pip or registry access is needed.

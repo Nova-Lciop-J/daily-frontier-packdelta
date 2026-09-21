@@ -1,4 +1,5 @@
 """CLI that never echoes raw file contents or exception values."""
+
 from __future__ import annotations
 import argparse
 import json
@@ -9,11 +10,15 @@ from .core import InputError, compare, load_snapshot
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Review two local npm .tgz files without running package code.")
+    parser = argparse.ArgumentParser(
+        description="Review two local npm .tgz files without running package code."
+    )
     parser.add_argument("before", type=Path)
     parser.add_argument("after", type=Path)
     parser.add_argument("--format", choices=("text", "json"), default="text")
-    parser.add_argument("--fail-on", choices=("review", "high", "change", "never"), default="review")
+    parser.add_argument(
+        "--fail-on", choices=("review", "high", "change", "never"), default="review"
+    )
     parser.add_argument("--version", action="version", version=__version__)
     args = parser.parse_args(argv)
     try:

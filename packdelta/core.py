@@ -1,4 +1,5 @@
 """Read bounded gzip/tar input without extraction, execution, or networking."""
+
 from __future__ import annotations
 
 import gzip
@@ -13,7 +14,10 @@ from typing import Any
 
 MIB = 1024 * 1024
 DEPENDENCY_FIELDS = (
-    "dependencies", "optionalDependencies", "peerDependencies", "devDependencies",
+    "dependencies",
+    "optionalDependencies",
+    "peerDependencies",
+    "devDependencies",
 )
 ENTRY_FIELDS = ("main", "module", "exports", "bin", "browser", "type")
 INSTALL_HOOKS = {"preinstall", "install", "postinstall", "prepare"}
@@ -47,7 +51,7 @@ class Snapshot:
     manifest: dict[str, Any]
 
 
-class BoundedReader:
+class BoundedReader(io.RawIOBase):
     def __init__(self, source: gzip.GzipFile, limit: int):
         self.source = source
         self.remaining = limit
@@ -87,9 +91,7 @@ def _manifest(data: bytes) -> dict[str, Any]:
             raise InputError("package.json needs nonempty name and version strings.")
     for field in ("scripts", *DEPENDENCY_FIELDS):
         mapping = value.get(field, {})
-        if not isinstance(mapping, dict) or any(
-            not isinstance(v, str) for v in mapping.values()
-        ):
+        if not isinstance(mapping, dict) or any(not isinstance(v, str) for v in mapping.values()):
             raise InputError("Scripts and dependency entries must be string maps.")
     return value
 
@@ -131,7 +133,9 @@ def load_snapshot(path: Path, limits: Limits | None = None) -> Snapshot:
                         raise InputError("Duplicate archive paths are not accepted.")
                     seen.add(name)
                     if member.issparse() or not (member.isfile() or member.isdir()):
-                        raise InputError("Links, sparse files and special members are not accepted.")
+                        raise InputError(
+                            "Links, sparse files and special members are not accepted."
+                        )
                     if member.size < 0 or member.size > limits.file_bytes:
                         raise InputError("Archive member exceeds the configured limit.")
                     if member.isdir():
@@ -165,7 +169,15 @@ def load_snapshot(path: Path, limits: Limits | None = None) -> Snapshot:
                 pass
     except InputError:
         raise
-    except (OSError, EOFError, tarfile.TarError, ValueError, OverflowError, RecursionError, zlib.error) as exc:
+    except (
+        OSError,
+        EOFError,
+        tarfile.TarError,
+        ValueError,
+        OverflowError,
+        RecursionError,
+        zlib.error,
+    ) as exc:
         raise InputError("Cannot read a supported, complete gzip/tar archive.") from exc
     if manifest_data is None:
         raise InputError("Archive is missing package/package.json.")
@@ -186,15 +198,29 @@ def compare(before: Snapshot, after: Snapshot) -> dict[str, Any]:
     for name in sorted(new):
         parts = name.casefold().split("/")
         leaf = parts[-1]
-        if (leaf.startswith(".env") or leaf in {".npmrc", ".pypirc", "id_rsa", "id_ed25519"}
-                or any(p in {".ssh", ".git", ".aws"} for p in parts)):
-            note("high", "sensitive-filename", name,
-                 "Potentially sensitive file is shipped; contents are not inspected or printed.")
+        if (
+            leaf.startswith(".env")
+            or leaf in {".npmrc", ".pypirc", "id_rsa", "id_ed25519"}
+            or any(p in {".ssh", ".git", ".aws"} for p in parts)
+        ):
+            note(
+                "high",
+                "sensitive-filename",
+                name,
+                "Potentially sensitive file is shipped; contents are not inspected or printed.",
+            )
         if new[name].mode & 0o6000:
-            note("high", "special-permission", name, "Setuid or setgid permission bits are present.")
+            note(
+                "high", "special-permission", name, "Setuid or setgid permission bits are present."
+            )
         if name in added or name in changed:
             if leaf.endswith(".map"):
-                note("review", "source-map", name, "Source map added or changed; review embedded sources.")
+                note(
+                    "review",
+                    "source-map",
+                    name,
+                    "Source map added or changed; review embedded sources.",
+                )
             if "node_modules" in parts:
                 note("review", "bundled-dependency", name, "Bundled dependency payload changed.")
             if leaf.endswith((".node", ".wasm", ".so", ".dll", ".exe")):
@@ -207,32 +233,62 @@ def compare(before: Snapshot, after: Snapshot) -> dict[str, Any]:
         prior, current = a.get(field, {}), b.get(field, {})
         for key in sorted(prior.keys() | current.keys()):
             if prior.get(key) != current.get(key):
-                kind = "added" if key not in prior else "removed" if key not in current else "changed"
-                level = "high" if field == "scripts" and key in INSTALL_HOOKS and key in current else "review"
-                note(level, "script-change" if field == "scripts" else "dependency-change",
-                     f"package/package.json:{field}/{key}",
-                     f"Entry {kind}; values deliberately omitted. Review exact input privately.")
+                kind = (
+                    "added" if key not in prior else "removed" if key not in current else "changed"
+                )
+                level = (
+                    "high"
+                    if field == "scripts" and key in INSTALL_HOOKS and key in current
+                    else "review"
+                )
+                note(
+                    level,
+                    "script-change" if field == "scripts" else "dependency-change",
+                    f"package/package.json:{field}/{key}",
+                    f"Entry {kind}; values deliberately omitted. Review exact input privately.",
+                )
     for field in ENTRY_FIELDS:
         if a.get(field) != b.get(field) or (field in a) != (field in b):
-            note("review", "entry-point-change", f"package/package.json:{field}",
-                 "Runtime entry point or module interpretation changed; values omitted.")
+            note(
+                "review",
+                "entry-point-change",
+                f"package/package.json:{field}",
+                "Runtime entry point or module interpretation changed; values omitted.",
+            )
     if a.get("license") != b.get("license"):
-        note("review", "license-change", "package/package.json:license", "License declaration changed.")
+        note(
+            "review",
+            "license-change",
+            "package/package.json:license",
+            "License declaration changed.",
+        )
     if a["name"] != b["name"]:
-        note("high", "package-name-change", "package/package.json:name", "Package identity changed.")
+        note(
+            "high", "package-name-change", "package/package.json:name", "Package identity changed."
+        )
     payload_changed = bool(added or removed or changed)
     if payload_changed and a["version"] == b["version"]:
-        note("review", "same-version-payload-change", "package/package.json:version",
-             "Payload changed without a version change.")
+        note(
+            "review",
+            "same-version-payload-change",
+            "package/package.json:version",
+            "Payload changed without a version change.",
+        )
     return {
         "schema_version": 1,
-        "tool": "packdelta", "tool_version": "0.1.0",
-        "before_sha256": before.archive_sha256, "after_sha256": after.archive_sha256,
-        "summary": {"added": len(added), "removed": len(removed), "changed": len(changed),
-                    "unchanged": len(old.keys() & new.keys()) - len(changed),
-                    "candidate_bytes": sum(e.size for e in new.values())},
+        "tool": "packdelta",
+        "tool_version": "0.1.0",
+        "before_sha256": before.archive_sha256,
+        "after_sha256": after.archive_sha256,
+        "summary": {
+            "added": len(added),
+            "removed": len(removed),
+            "changed": len(changed),
+            "unchanged": len(old.keys() & new.keys()) - len(changed),
+            "candidate_bytes": sum(e.size for e in new.values()),
+        },
         "files": {"added": added, "removed": removed, "changed": changed},
         "findings": sorted(findings, key=lambda x: (x["level"], x["rule"], x["location"])),
         "notice": "Review aid only: not a secret scanner, malware verdict, or compatibility proof. "
-                  "Reports include archive member names; review before sharing.",
+        "Reports include archive member names; review before sharing.",
     }
